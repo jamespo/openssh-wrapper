@@ -5,6 +5,7 @@ This is a wrapper around the openssh binaries ssh and scp.
 import io
 import re
 import os
+import os.path
 import sys
 import pipes
 import signal
@@ -189,6 +190,51 @@ class SSHConnection(object):
             raise SSHError("%s (under %s): %s" % (
                 ' '.join(ssh_command), self.user, err.strip()))
         return SSHResult(command, out.strip(), err.strip(), returncode)
+
+    def scpget(self, remotedir, localdir='.', mode=None, owner=None):
+        scp_command = self.scpget_command(remotedir, localdir)
+        pipe = subprocess.Popen(scp_command,
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, env=self.get_env())
+        try:
+            signal.signal(signal.SIGALRM, _timeout_handler)
+        except ValueError:  # signal only works in main thread
+            pass
+        signal.alarm(self.timeout)
+        err = b('')
+        try:
+            _, err = pipe.communicate()
+        except IOError as exc:
+            # pipe.terminate() # only in python 2.6 allowed
+            os.kill(pipe.pid, signal.SIGTERM)
+            signal.alarm(0)  # disable alarm
+            cleanup_tmp_dir()
+            raise SSHError("%s (under %s): %s" % (
+                ' '.join(scp_command), self.user, str(exc)))
+        signal.alarm(0)  # disable alarm
+        returncode = pipe.returncode
+
+
+    def scpget_command(self, remotedir, localdir):
+        cmd = ['/usr/bin/scp', self.debug and '-vvvv' or '-q', '-r']
+        if self.login:
+            remotename = '%s@%s' % (u(self.login), u(self.server))
+        else:
+            remotename = self.server
+        if self.configfile:
+            cmd += ['-F', self.configfile]
+        if self.identity_file:
+            cmd += ['-i', self.identity_file]
+        if self.port:
+            cmd += ['-P', self.port]
+
+        if not os.path.isdir(localdir):
+            raise ValueError('"localdir" argument must be local directory')
+
+        cmd.append('%s:%s' % (remotename, remotedir))
+        cmd += [localdir]
+        return b_list(cmd)
+
 
     def scp(self, files, target, mode=None, owner=None):
         """ Copy files identified by their names to remote location
