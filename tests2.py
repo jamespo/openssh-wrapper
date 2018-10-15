@@ -1,5 +1,8 @@
 from __future__ import print_function
-from backports import tempfile
+try:
+    from backports import tempfile
+except ImportError:
+    import tempfile      # py 3
 from openssh_wrapper import SSHConnection
 import getpass
 import os.path
