@@ -191,11 +191,21 @@ class SSHConnection(object):
                 ' '.join(ssh_command), self.user, err.strip()))
         return SSHResult(command, out.strip(), err.strip(), returncode)
 
-    def scpget(self, remotedir, localdir='.', mode=None, owner=None):
-        scp_command = self.scpget_command(remotedir, localdir)
+    def scpget(self, remotepath, target='.'):
+        """ Copy files from remote location to local directory
+
+        :param remotepath: remote path to copy files from
+
+        :param target: local directory to copy files to, defaults to
+        current directory
+
+        :return: None
+        :raise: SSHError
+        """
+        scp_command = self.scpget_command(remotepath, target)
         pipe = subprocess.Popen(scp_command,
-                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE, env=self.get_env())
+                                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, env=self.get_env())
         try:
             signal.signal(signal.SIGALRM, _timeout_handler)
         except ValueError:  # signal only works in main thread
@@ -208,14 +218,20 @@ class SSHConnection(object):
             # pipe.terminate() # only in python 2.6 allowed
             os.kill(pipe.pid, signal.SIGTERM)
             signal.alarm(0)  # disable alarm
-            cleanup_tmp_dir()
             raise SSHError("%s (under %s): %s" % (
                 ' '.join(scp_command), self.user, str(exc)))
         signal.alarm(0)  # disable alarm
         returncode = pipe.returncode
+        if returncode != 0:  # ssh client error
+            raise SSHError("%s (under %s): %s" % (
+                ' '.join(scp_command), self.user, err.strip()))
 
+    def scpget_command(self, remotepath, target):
+        """
+        Build the command string to download the files identified by remotepath.
 
-    def scpget_command(self, remotedir, localdir):
+        Include target(s) if specified. Internal function
+        """
         cmd = ['/usr/bin/scp', self.debug and '-vvvv' or '-q', '-r']
         if self.login:
             remotename = '%s@%s' % (u(self.login), u(self.server))
@@ -228,11 +244,11 @@ class SSHConnection(object):
         if self.port:
             cmd += ['-P', self.port]
 
-        if not os.path.isdir(localdir):
-            raise ValueError('"localdir" argument must be local directory')
+        if not os.path.isdir(target):
+            raise ValueError('"target" argument must be local directory')
 
-        cmd.append('%s:%s' % (remotename, remotedir))
-        cmd += [localdir]
+        cmd.append('%s:%s' % (remotename, remotepath))
+        cmd.append(target)
         return b_list(cmd)
 
 
